@@ -5,28 +5,16 @@ const {
   GraphQLSchema,
   GraphQLString,
   GraphQLID,
-  GraphQLList
+  GraphQLList,
+  GraphQLNonNull
 } = require('graphql')
+const knex = require('knex')
+const knexfile = require('./knexfile')
+
+// database connection
+const database = knex(knexfile.development)
 
 const app = new express()
-
-const users = [
-  {
-    id: 1,
-    firstName: "test",
-    lastName: "test"
-  },
-  {
-    id: 2,
-    firstName: "test 2",
-    lastName: "test 2"
-  },
-  {
-    id: 3,
-    firstName: "test 3",
-    lastName: "test 3"
-  },
-]
 
 // Types
 const userType = new GraphQLObjectType({
@@ -38,21 +26,24 @@ const userType = new GraphQLObjectType({
   })
 })
 
+// Queries
 const Queries = {
   user: {
     type: userType,
     args: {
       id: {type: GraphQLID}
     },
-    resolve: (parent, args, context) => user = users.filter( user => user.id == args.id ).shift()
+    resolve: async (parent, args, context) => {
+      return (await database.select('*').from('users').where({id: args.id})).shift()
+    }
   },
   users: {
     type: new GraphQLList(userType),
-    resolve: (parent, args, context) => users
+    resolve: async (parent, args, context) => await database.select('*').from('users')
   }
 }
 
-// Queries
+
 const RootQuery = new GraphQLObjectType({
   name: 'RootQuery',
   fields: {
@@ -60,9 +51,61 @@ const RootQuery = new GraphQLObjectType({
   }
 })
 
+// Mutations
+const UserMutation = {
+  addUser: {
+    type: userType,
+    args: {
+      firstName: {
+        type: new GraphQLNonNull(GraphQLString)
+      },
+      lastName: {
+        type: new GraphQLNonNull(GraphQLString)
+      }
+    },
+    resolve: async (parent, args, context) => {
+      return (await database.returning(['id', 'firstName', 'lastName']).insert(args).into('users')).shift()
+    }
+  },
+  editUser: {
+    type: userType,
+    args: {
+      id: {
+        type: new GraphQLNonNull(GraphQLID)
+      },
+      firstName: {
+        type: GraphQLString
+      },
+      lastName: {
+        type: GraphQLString
+      }
+    },
+    resolve: async (parent, args, context) => {
+      return (await database('users').returning(['id', 'firstName', 'lastName']).update(args).where({id: args.id})).shift()
+    }
+  },
+  deleteUser: {
+    type: userType,
+    args: {
+      id: {
+        type: new GraphQLNonNull(GraphQLID)
+      }
+    },
+    resolve: (parent, args, context) => database('users').where({id: args.id}).del()
+  }
+}
+
+const mutations = new GraphQLObjectType({
+  name: 'Mutations',
+  fields: {
+    ...UserMutation
+  }
+})
+
 // Schema
 const schema = new GraphQLSchema({
-  query: RootQuery
+  query: RootQuery,
+  mutation: mutations
 })
 
 app.use('/graphql', expressQraphql({
